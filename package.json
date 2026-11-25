@@ -1,0 +1,18 @@
+{
+  "name": "rain-guard-vision",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "雨天高速公路监控画面去雨/去水珠/压光晕 WebGL2 处理工具",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

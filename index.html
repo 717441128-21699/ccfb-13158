@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%A7%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+    <title>雨盾视觉 · 雨天监控画面修复平台</title>
+    <link rel="stylesheet" href="/src/ui/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-logo">🌧️</span>
+        <div>
+          <h1>雨盾视觉</h1>
+          <p>高速公路雨天监控去雨 · 去水珠 · 压光晕（WebGL2 逐像素处理）</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <span id="statusPill" class="pill pill-ok">合成源运行中</span>
+        <span id="resPill" class="pill">1920×1080</span>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="source" role="tab">① 监控源接入</button>
+      <button class="tab" data-tab="preview" role="tab">② 去雨预览</button>
+      <button class="tab" data-tab="droplet" role="tab">③ 水珠区域标注</button>
+      <button class="tab" data-tab="record" role="tab">④ 处理后录像</button>
+    </nav>
+
+    <main class="tab-body">
+      <!-- ① 监控源接入 -->
+      <section class="tab-pane active" data-pane="source">
+        <div class="panel-grid">
+          <div class="panel panel-controls">
+            <h2>信号源</h2>
+            <div class="source-row">
+              <button class="btn btn-primary" id="btnSynthetic">内置合成监控源</button>
+              <label class="btn">
+                上传监控录像
+                <input type="file" id="fileInput" accept="video/*" hidden />
+              </label>
+              <button class="btn" id="btnCamera">打开本机摄像头</button>
+              <select id="cameraSelect" class="select" hidden></select>
+            </div>
+            <p class="hint" id="sourceHint">
+              合成源在程序化晴天高速场景上叠加雨量、镜头水珠和车灯光晕，并保留同时段晴天真值帧用于 PSNR 对照。
+            </p>
+
+            <h2>雨天退化合成参数</h2>
+            <div class="control" id="ctlRain">
+              <label>雨量（小雨 / 中雨 / 暴雨）<span class="val" id="valRain">0.60</span></label>
+              <input type="range" id="rainIntensity" min="0" max="1" step="0.01" value="0.6" />
+              <div class="preset-row">
+                <button class="btn-mini" data-preset-rain="0.25">小雨</button>
+                <button class="btn-mini" data-preset-rain="0.6">中雨</button>
+                <button class="btn-mini" data-preset-rain="0.95">暴雨</button>
+              </div>
+            </div>
+            <div class="control">
+              <label>雨线方向（与竖直夹角）<span class="val" id="valAngle">12°</span></label>
+              <input type="range" id="rainAngle" min="-35" max="35" step="1" value="12" />
+            </div>
+            <div class="control">
+              <label>镜头水珠密度<span class="val" id="valDrop">0.55</span></label>
+              <input type="range" id="dropletDensity" min="0" max="1" step="0.01" value="0.55" />
+            </div>
+            <div class="control">
+              <label>车灯光晕强度<span class="val" id="valGlare">0.70</span></label>
+              <input type="range" id="glareStrength" min="0" max="1" step="0.01" value="0.7" />
+            </div>
+            <div class="control">
+              <label>随机种子<span class="val" id="valSeed">7</span></label>
+              <input type="range" id="seed" min="1" max="99" step="1" value="7" />
+              <button class="btn-mini" id="btnReseed">换一组雨样</button>
+            </div>
+
+            <h2>工作分辨率</h2>
+            <div class="source-row">
+              <button class="btn-mini resolution-btn" data-scale="1">1080p 全分辨率</button>
+              <button class="btn-mini resolution-btn" data-scale="0.75">75%</button>
+              <button class="btn-mini resolution-btn active" data-scale="1">自适应</button>
+            </div>
+            <p class="hint">达不到 25fps 时自动降工作分辨率，显示与录制仍按 1080p 输出。</p>
+          </div>
+
+          <div class="panel panel-video">
+            <h2>原始监控画面（雨天输入）</h2>
+            <div class="canvas-wrap">
+              <canvas id="inputCanvas" width="960" height="540"></canvas>
+            </div>
+            <div class="play-row">
+              <button class="btn" id="btnPlayPause">暂停</button>
+              <span class="hint" id="timeLabel">t = 0.0 s</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ② 去雨预览 -->
+      <section class="tab-pane" data-pane="preview">
+        <div class="panel-grid">
+          <div class="panel panel-controls">
+            <h2>去雨算法参数</h2>
+            <div class="control">
+              <label>雨线亮度阈值<span class="val" id="valThresh">0.10</span></label>
+              <input type="range" id="rainThresh" min="0.03" max="0.5" step="0.01" value="0.1" />
+            </div>
+            <div class="control">
+              <label>时序窗口帧数<span class="val" id="valFrames">7</span></label>
+              <input type="range" id="temporalFrames" min="3" max="7" step="2" value="7" />
+            </div>
+            <div class="control">
+              <label>车辆/车道线边缘保护<span class="val" id="valEdge">1.00</span></label>
+              <input type="range" id="edgeGuard" min="0" max="2" step="0.05" value="1" />
+            </div>
+            <div class="control">
+              <label>水珠检测灵敏度<span class="val" id="valDropSense">0.60</span></label>
+              <input type="range" id="dropSense" min="0" max="1" step="0.01" value="0.6" />
+            </div>
+            <div class="control">
+              <label>静态证据保持系数<span class="val" id="valHold">0.92</span></label>
+              <input type="range" id="dropHold" min="0.8" max="0.98" step="0.01" value="0.92" />
+            </div>
+            <label class="check-row">
+              <input type="checkbox" id="chkMask" />
+              叠加显示雨线（橙）/水珠（蓝）检测掩膜
+            </label>
+            <button class="btn" id="btnResetTemporal">重置时序累积</button>
+
+            <h2>实时指标</h2>
+            <div class="metrics-grid" id="metricsBox">
+              <div class="metric"><span>输入 PSNR</span><b id="mPsnrIn">—</b></div>
+              <div class="metric"><span>处理后 PSNR</span><b id="mPsnrOut">—</b></div>
+              <div class="metric metric-hl"><span>PSNR 提升</span><b id="mPsnrGain">—</b></div>
+              <div class="metric"><span>处理帧率</span><b id="mFps">—</b></div>
+              <div class="metric"><span>单帧耗时</span><b id="mMs">—</b></div>
+              <div class="metric"><span>输入车牌可辨认率</span><b id="mPlateIn">—</b></div>
+              <div class="metric metric-hl"><span>处理后可辨认率</span><b id="mPlateOut">—</b></div>
+              <div class="metric"><span>辨认率提升倍数</span><b id="mPlateRatio">—</b></div>
+            </div>
+            <p class="hint" id="metricsHint">指标仅在合成源下可用（需要同时段晴天真值帧）。</p>
+          </div>
+
+          <div class="panel panel-video">
+            <h2>处理后画面（去雨 + 去水珠 + 压光晕）</h2>
+            <div class="canvas-wrap">
+              <canvas id="outputCanvas" width="960" height="540"></canvas>
+            </div>
+            <div class="split-row">
+              <figure>
+                <canvas id="gtCanvas" width="320" height="180"></canvas>
+                <figcaption>同时段晴天真值（GT）</figcaption>
+              </figure>
+              <figure>
+                <canvas id="maskCanvas" width="320" height="180"></canvas>
+                <figcaption>雨线/水珠检测掩膜</figcaption>
+              </figure>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ③ 水珠区域标注 -->
+      <section class="tab-pane" data-pane="droplet">
+        <div class="panel-grid">
+          <div class="panel panel-controls">
+            <h2>手动标注</h2>
+            <p class="hint">
+              在画面上拖拽画出镜头水珠区域，标注会强制纳入水珠掩膜并参与时序/空间修补。
+              自动检测持续运行，手动标注用于修正漏检。
+            </p>
+            <div class="source-row">
+              <button class="btn btn-primary" id="btnAddMark">画水珠模式</button>
+              <button class="btn" id="btnClearMarks">清空标注</button>
+            </div>
+            <label class="check-row">
+              <input type="checkbox" id="chkAutoDrop" checked />
+              启用自动水珠检测（锐度 + 环形边缘 + 静态证据）
+            </label>
+            <h2>已标注区域</h2>
+            <ul class="mark-list" id="markList"><li class="hint">暂无标注</li></ul>
+          </div>
+          <div class="panel panel-video">
+            <h2>水珠标注画布（点击/拖拽画圆）</h2>
+            <div class="canvas-wrap">
+              <canvas id="dropCanvas" width="960" height="540"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ④ 处理后录像 -->
+      <section class="tab-pane" data-pane="record">
+        <div class="panel-grid">
+          <div class="panel panel-controls">
+            <h2>录制处理结果</h2>
+            <div class="source-row">
+              <button class="btn btn-primary" id="btnRecord">● 开始录制</button>
+              <button class="btn" id="btnSnapshot">保存当前帧 PNG</button>
+            </div>
+            <p class="hint">
+              录制内容为处理后 1080p WebGL 输出（VP9/VP8 WebM），帧率 25fps。
+              停止后自动下载，也可在下方列表重复下载。
+            </p>
+            <h2>录制文件</h2>
+            <ul class="mark-list" id="recList"><li class="hint">暂无录像</li></ul>
+          </div>
+          <div class="panel panel-video">
+            <h2>录制预览</h2>
+            <div class="canvas-wrap">
+              <canvas id="recordCanvas" width="960" height="540"></canvas>
+            </div>
+            <p class="hint" id="recStatus">未在录制。</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>逐像素处理全部运行在 WebGL2（GLSL ES 3.0），业务逻辑与指标统计为 TypeScript。</span>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
